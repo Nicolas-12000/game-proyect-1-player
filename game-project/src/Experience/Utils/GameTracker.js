@@ -120,7 +120,7 @@ export default class GameTracker {
                 width: '120px',
                 marginBottom: '15px'
             },
-            message: `¡Felicidades!\nRecolectaste todas las monedas.\n⏱ Tu tiempo: ${currentTime}s\n\n🏆 Mejores tiempos:\n${ranking}`,
+            message: `¡Felicidades!\nRecolectaste todas las monedas.\n⏱ Tu tiempo: ${currentTime}s\n\n🏆`,
             buttons: [
                 {
                     text: '🔁 Jugar de nuevo',
