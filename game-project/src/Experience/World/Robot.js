@@ -20,7 +20,7 @@ export default class Robot {
         
         // Cooldown para colisiones - REDUCIDO
         this.lastCollisionTime = 0
-        this.collisionCooldown = 400 // 400ms entre empujes
+        this.collisionCooldown = 150
 
         // Optimización de verificación de suelo
         this.lastGroundCheck = 0
@@ -48,6 +48,21 @@ export default class Robot {
         this.setSounds()
         this.setPhysics()
         this.setAnimation()
+
+        // Añade esta variable al constructor después de las variables existentes
+        this.jumpKeyPressed = false
+        window.addEventListener('keydown', (event) => {
+    if (event.code === 'Space') {
+        event.preventDefault();
+    }
+});
+
+window.addEventListener('keyup', (event) => {
+    if (event.code === 'Space') {
+        event.preventDefault();
+        this.jumpKeyPressed = false;
+    }
+});
     }
 
     setModel() {
@@ -290,35 +305,80 @@ export default class Robot {
             
             // Manejo de colisiones desde arriba
             if (normal.y > 0.3 && this.body.velocity.y < -1) {
+                // Amortiguación inicial del impacto vertical
                 this.body.velocity.y = Math.max(this.body.velocity.y * 0.2, -0.6)
                 
-                const slideForce = Math.min(Math.abs(this.body.velocity.y) * 0.3, 2.0) // Reducido slide
-                const slideDirection = new THREE.Vector3(0, 0, 1).applyQuaternion(this.group.quaternion)
+                const otherBodyPosition = otherBody ? otherBody.position.y : 0
+                const isGroundLevel = otherBodyPosition < 0.5
                 
-                this.body.velocity.x += slideDirection.x * slideForce * 0.5
-                this.body.velocity.z += slideDirection.z * slideForce * 0.5
+                if (!isGroundLevel) {
+                    // SISTEMA COMBINADO DE REBOTE Y DESLIZAMIENTO
+                    const bounceForce = 0.4 // Fuerza del rebote
+                    const slideForce = 0.6   // Fuerza del deslizamiento
+                    
+                    // 1. Componente de rebote (empuje opuesto)
+                    const bounceVelocity = Math.abs(this.body.velocity.y) * bounceForce
+                    this.body.velocity.x -= normal.x * bounceVelocity
+                    this.body.velocity.z -= normal.z * bounceVelocity
+                    
+                    // 2. Componente de deslizamiento (en la dirección de movimiento)
+                    const slideDirection = new THREE.Vector3(0, 0, 1).applyQuaternion(this.group.quaternion)
+                    const slideMagnitude = Math.min(Math.abs(this.body.velocity.y) * slideForce, 3.0)
+                    
+                    this.body.velocity.x += slideDirection.x * slideMagnitude
+                    this.body.velocity.z += slideDirection.z * slideMagnitude
+                    
+                    // Pequeño impulso hacia arriba para evitar pegarse
+                    this.body.velocity.y += 0.2
+                } else {
+                    // En suelo, solo reducir velocidad horizontal
+                    this.body.velocity.x *= 0.1
+                    this.body.velocity.z *= 0.1
+                }
                 
                 this.lastCollisionTime = currentTime
                 return
             }
             
-            // Colisiones laterales más fluidas
+            // Colisiones laterales más fluidas y con menos deslizamiento
             if (Math.abs(normal.x) > 0.5 || Math.abs(normal.z) > 0.5) {
                 const velocityMagnitude = Math.sqrt(this.body.velocity.x**2 + this.body.velocity.z**2)
-                if (velocityMagnitude > 1.5) { // Reducido de 1.8
-                    const reductionFactor = Math.max(0.7, 1 - (velocityMagnitude / 10)) // Más conservador
-                    this.body.velocity.x *= reductionFactor
-                    this.body.velocity.z *= reductionFactor
-                }
                 
-                if (velocityMagnitude < 1.0) { // Reducido de 1.3
-                    const gentlePush = 0.08 // Reducido de 0.1
-                    const pushDirection = new CANNON.Vec3(
-                        -normal.x * gentlePush,
-                        0,
-                        -normal.z * gentlePush
+                if (velocityMagnitude > 1.5) {
+                    // Obtener dirección actual del personaje
+                    const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(this.group.quaternion)
+                    
+                    // Calcular el dot product para saber si vamos hacia adelante o atrás
+                    const movementDot = forward.x * this.body.velocity.x + forward.z * this.body.velocity.z
+                    const isMovingForward = movementDot > 0
+                    
+                    // Calcular dirección de rebote basada en el movimiento
+                    let bounceDirection = new CANNON.Vec3()
+                    if (isMovingForward) {
+                        // Si va hacia adelante, rebotar hacia atrás con más fuerza
+                        bounceDirection.x = -forward.x * 1.5 // Multiplicador de dirección aumentado
+                        bounceDirection.z = -forward.z * 1.5
+                    } else {
+                        // Si va hacia atrás, rebotar hacia adelante con más fuerza
+                        bounceDirection.x = forward.x * 1.5
+                        bounceDirection.z = forward.z * 1.5
+                    }
+                    
+                    // Aumentar fuerza de rebote
+                    const bounceForce = Math.min(velocityMagnitude * 1.2, 6.0) // Aumentado significativamente
+                    
+                    // Aplicar impulso con más fuerza
+                    this.body.applyImpulse(
+                        new CANNON.Vec3(
+                            bounceDirection.x * bounceForce,
+                            0.6, // Más empuje vertical para evitar pegarse
+                            bounceDirection.z * bounceForce
+                        )
                     )
-                    this.body.applyImpulse(pushDirection)
+                    
+                    // Mantener más momentum
+                    this.body.velocity.x *= 0.6
+                    this.body.velocity.z *= 0.6
                 }
             }
             
@@ -457,6 +517,8 @@ export default class Robot {
         this.body.torque.setZero()
         this.body.velocity.setZero()
         this.body.angularVelocity.setZero()
+        window.removeEventListener('keydown', this.handleKeyDown);
+    window.removeEventListener('keyup', this.handleKeyUp);
     }
 
     update() {
@@ -533,15 +595,16 @@ export default class Robot {
         }
 
         // ⚖️ SISTEMA DE SALTO AJUSTADO PARA VELOCIDAD MÁS BAJA
-        if (keys.space && (!this.stunned || this.stunMovementFactor > 0)) {
+        if (keys.space && !this.jumpKeyPressed && (!this.stunned || this.stunMovementFactor > 0)) {
+            this.jumpKeyPressed = true
             const currentTime = Date.now()
             
             if (this.onGround) {
                 const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(this.group.quaternion)
                 
-                let jumpForceX = 0.65 // AUMENTADO: Era 0.55 - Más distancia de salto
-                let jumpForceY = 0.58 // MANTENIDO: Altura perfecta como está
-                let jumpForceZ = 0.85 // AUMENTADO: Era 0.75 - Más impulso hacia adelante para dinamismo
+                let jumpForceX = 0.65
+                let jumpForceY = 10  // AUMENTADO: Era 0.58 - Más altura de salto
+                let jumpForceZ = 0.90 // AUMENTADO: Era 0.75 - Más impulso hacia adelante para dinamismo
                 
                 // Aplicar efectos a salto
                 if (this.slowEffect) {
@@ -602,6 +665,8 @@ export default class Robot {
                     this.lastJumpTime = currentTime
                 }
             }
+        } else if (!keys.space) {
+            this.jumpKeyPressed = false
         }
 
         // Decay de bhop speed más gradual para mayor dinamismo
