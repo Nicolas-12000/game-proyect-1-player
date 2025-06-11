@@ -13,21 +13,21 @@ export default class Robot {
         this.debug = this.experience.debug
         this.points = 0
 
-        // Variables para bunny hop - OPTIMIZADAS
+        // Variables para bunny hop 
         this.bhopSpeed = 0
         this.lastJumpTime = 0
         this.onGround = false
         
         // Cooldown para colisiones - REDUCIDO
         this.lastCollisionTime = 0
-        this.collisionCooldown = 150
+        this.collisionCooldown = 200
 
         // Optimización de verificación de suelo
         this.lastGroundCheck = 0
         this.groundCheckInterval = 250 // Verificar cada 250ms
         this.lastKnownGroundState = false 
 
-        // ⚖️ SISTEMA DE STUN/SLOW REBALANCEADO
+        // ⚖️ SISTEMA DE STUN/SLOW
         this.stunned = false
         this.stunEndTime = 0
         this.stunDuration = 1200 // 1.2 segundos
@@ -313,7 +313,7 @@ window.addEventListener('keyup', (event) => {
                 
                 if (!isGroundLevel) {
                     // SISTEMA COMBINADO DE REBOTE Y DESLIZAMIENTO
-                    const bounceForce = 0.4 // Fuerza del rebote
+                    const bounceForce = 0.5 // Fuerza del rebote
                     const slideForce = 0.6   // Fuerza del deslizamiento
                     
                     // 1. Componente de rebote (empuje opuesto)
@@ -371,7 +371,7 @@ window.addEventListener('keyup', (event) => {
                     this.body.applyImpulse(
                         new CANNON.Vec3(
                             bounceDirection.x * bounceForce,
-                            0.7, // Más empuje vertical para evitar pegarse
+                            0.2, // Más empuje vertical para evitar pegarse
                             bounceDirection.z * bounceForce
                         )
                     )
@@ -388,9 +388,7 @@ window.addEventListener('keyup', (event) => {
 
             this.lastCollisionTime = currentTime
         }
-    } 
-
-    checkGroundContact() {
+    }     checkGroundContact() {
         const currentTime = Date.now()
         
         // Usar el último estado conocido si no ha pasado suficiente tiempo
@@ -400,26 +398,45 @@ window.addEventListener('keyup', (event) => {
         }
         
         this.lastGroundCheck = currentTime
-        
-        const groundLevel = 0.4
-        const tolerance = 0.1
         const wasOnGround = this.onGround
         
-        if (this.body.position.y <= groundLevel + tolerance) {
-            this.onGround = true
-            this.lastKnownGroundState = true
-        } else {
-            const isNearGround = this.body.position.y <= groundLevel + (tolerance * 2)
-            const hasLowVerticalVelocity = Math.abs(this.body.velocity.y) < 0.5
+        // Raycast hacia abajo para detectar superficies
+        const rayStart = new CANNON.Vec3(
+            this.body.position.x,
+            this.body.position.y,
+            this.body.position.z
+        )
+        const rayEnd = new CANNON.Vec3(
+            this.body.position.x,
+            this.body.position.y - 0.6, // Distancia del raycast
+            this.body.position.z
+        )
+        
+        const raycastResult = new CANNON.RaycastResult()
+        this.physics.world.raycastClosest(rayStart, rayEnd, {
+            collisionFilterMask: -1 // Colisionar con todo
+        }, raycastResult)
+        
+        // Verificar si hay una superficie cerca
+        if (raycastResult.hasHit) {
+            const verticalVelocity = Math.abs(this.body.velocity.y)
+            const isStable = verticalVelocity < 0.5 // Velocidad vertical baja
             
-            if (isNearGround && hasLowVerticalVelocity) {
+            if (raycastResult.distance < 0.6 && isStable) {
                 this.onGround = true
                 this.lastKnownGroundState = true
-            } else {
-                this.onGround = false
-                this.lastKnownGroundState = false
+                
+                // Debug
+                if (this.debug && this.debug.active) {
+                    console.log('🦶 En superficie:', raycastResult.distance.toFixed(2))
+                }
+                return
             }
         }
+        
+        // Si no se detectó ninguna superficie
+        this.onGround = false
+        this.lastKnownGroundState = false
     }
 
     setSounds() {
