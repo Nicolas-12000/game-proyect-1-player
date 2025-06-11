@@ -356,12 +356,12 @@ window.addEventListener('keyup', (event) => {
                     let bounceDirection = new CANNON.Vec3()
                     if (isMovingForward) {
                         // Si va hacia adelante, rebotar hacia atrás con más fuerza
-                        bounceDirection.x = -forward.x * 1.5 // Multiplicador de dirección aumentado
-                        bounceDirection.z = -forward.z * 1.5
+                        bounceDirection.x = -forward.x * 90// Multiplicador de dirección aumentado
+                        bounceDirection.z = -forward.z * 90
                     } else {
                         // Si va hacia atrás, rebotar hacia adelante con más fuerza
-                        bounceDirection.x = forward.x * 1.5
-                        bounceDirection.z = forward.z * 1.5
+                        bounceDirection.x = forward.x * 90
+                        bounceDirection.z = forward.z * 90
                     }
                     
                     // Aumentar fuerza de rebote
@@ -371,7 +371,7 @@ window.addEventListener('keyup', (event) => {
                     this.body.applyImpulse(
                         new CANNON.Vec3(
                             bounceDirection.x * bounceForce,
-                            0.6, // Más empuje vertical para evitar pegarse
+                            0.7, // Más empuje vertical para evitar pegarse
                             bounceDirection.z * bounceForce
                         )
                     )
