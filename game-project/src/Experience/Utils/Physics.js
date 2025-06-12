@@ -52,12 +52,12 @@ export default class Physics {
             this.robotMaterial,
             this.wallMaterial,
             {
-                friction: 0.25,                        // 🔧 Menos fricción: 0.4 → 0.25
+                friction: 0.8,                        // 🔧 Menos fricción: 0.4 → 0.25
                 restitution: 0.0,                      // 🔧 Sin rebote
-                contactEquationStiffness: 4e5,         // 🔧 Mucho menos rígido: 7e5 → 4e5
-                contactEquationRelaxation: 25,         // 🔧 Extremadamente suave: 15 → 25
-                frictionEquationStiffness: 4e4,        // 🔧 Menos rígido: 7e4 → 4e4
-                frictionEquationRelaxation: 25         // 🔧 Extremadamente suave: 15 → 25
+                contactEquationStiffness: 6e5,         // 🔧 Mucho menos rígido: 7e5 → 4e5
+                contactEquationRelaxation: 15,         // 🔧 Extremadamente suave: 15 → 25
+                frictionEquationStiffness: 6e4,        // 🔧 Menos rígido: 7e4 → 4e4
+                frictionEquationRelaxation: 15         // 🔧 Extremadamente suave: 15 → 25
             }
         )
         this.world.addContactMaterial(robotWallContact)

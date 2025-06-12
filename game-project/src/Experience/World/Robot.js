@@ -248,12 +248,11 @@ window.addEventListener('keyup', (event) => {
             this.slowEffect = false
             console.log('✅ Slow terminado')
         }
-    }
-
-    handleCollision(event) {
+    }    handleCollision(event) {
         const contact = event.contact
         const currentTime = Date.now()
         
+        // Cooldown básico
         if (currentTime - this.lastCollisionTime < this.collisionCooldown) {
             return
         }
@@ -262,133 +261,44 @@ window.addEventListener('keyup', (event) => {
             const normal = contact.bi === this.body ? contact.ni : contact.nj
             const otherBody = contact.bi === this.body ? contact.bj : contact.bi
             
-            // Detectar suelo y no aplicar efectos
+            // 1. DETECCIÓN DE SUELO (prioridad máxima)
             if (normal.y > 0.7) {
                 this.onGround = true
                 return
             }
             
-            if (normal.y > 0.3 && this.body.velocity.y < 0) {
-                return // Aterrizaje
-            }
-
-            // Aplicar efectos solo en colisiones válidas
+            // 2. COLISIONES LATERALES CON EFECTOS
             const isLateralCollision = Math.abs(normal.x) > 0.4 || Math.abs(normal.z) > 0.4
-            const isWallCollision = otherBody && (
-                otherBody.material === this.physics.wallMaterial || 
-                otherBody.material === this.physics.obstacleMaterial
-            )
-            
-            if (isLateralCollision || isWallCollision) {
-                const currentVel = this.body.velocity
-                const velocityMagnitude = Math.sqrt(currentVel.x**2 + currentVel.z**2)
+            if (isLateralCollision) {
+                const velocity = Math.sqrt(this.body.velocity.x**2 + this.body.velocity.z**2)
                 
-                // 🎯 UMBRALES AJUSTADOS PARA MAYOR DINAMISMO
-                // Velocidad de caminata normal: ~1.5-3
-                // Velocidad de bunny hop: ~4-12+
+                // Aplicar efectos según velocidad
+                if (velocity > 5.5) {
+                    this.applyStun()
+                } else if (velocity > 1.8) {
+                    this.applySlow()
+                }
                 
-                if (velocityMagnitude > 5.5) { // AUMENTADO: Era 5.0 - Permite más velocidad antes del stun
-                    const stunSuccess = this.applyStun(1200)
-                    if (stunSuccess) {
-                        console.log('💥 COLISIÓN A ALTA VELOCIDAD (bunny hop) - Stun aplicado! Vel:', velocityMagnitude.toFixed(1))
-                    }
-                }
-                else if (velocityMagnitude > 1.8) { // SLOW AZUL: Reducido de 2.0 para velocidades más bajas
-                    this.applySlow(2500, 0.25)
-                    console.log('⚡ COLISIÓN A VELOCIDAD NORMAL (caminata) - Slow aplicado! Vel:', velocityMagnitude.toFixed(1))
-                }
-                else {
-                    // Sin efectos para velocidades muy bajas
-                    console.log('🚶 Colisión muy lenta - Sin efectos. Vel:', velocityMagnitude.toFixed(1))
-                }
+                // Rebote simple
+                const bounceForce = Math.min(velocity * 0.8, 4.0)
+                const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(this.group.quaternion)
+                
+                this.body.velocity.x += -forward.x * bounceForce
+                this.body.velocity.z += -forward.z * bounceForce
+                this.body.velocity.x *= 0.7
+                this.body.velocity.z *= 0.7
             }
             
-            // Manejo de colisiones desde arriba
+            // 3. COLISIONES DESDE ARRIBA
             if (normal.y > 0.3 && this.body.velocity.y < -1) {
-                // Amortiguación inicial del impacto vertical
-                this.body.velocity.y = Math.max(this.body.velocity.y * 0.2, -0.6)
-                
-                const otherBodyPosition = otherBody ? otherBody.position.y : 0
-                const isGroundLevel = otherBodyPosition < 0.5
-                
-                if (!isGroundLevel) {
-                    // SISTEMA COMBINADO DE REBOTE Y DESLIZAMIENTO
-                    const bounceForce = 0.5 // Fuerza del rebote
-                    const slideForce = 0.6   // Fuerza del deslizamiento
-                    
-                    // 1. Componente de rebote (empuje opuesto)
-                    const bounceVelocity = Math.abs(this.body.velocity.y) * bounceForce
-                    this.body.velocity.x -= normal.x * bounceVelocity
-                    this.body.velocity.z -= normal.z * bounceVelocity
-                    
-                    // 2. Componente de deslizamiento (en la dirección de movimiento)
-                    const slideDirection = new THREE.Vector3(0, 0, 1).applyQuaternion(this.group.quaternion)
-                    const slideMagnitude = Math.min(Math.abs(this.body.velocity.y) * slideForce, 3.0)
-                    
-                    this.body.velocity.x += slideDirection.x * slideMagnitude
-                    this.body.velocity.z += slideDirection.z * slideMagnitude
-                    
-                    // Pequeño impulso hacia arriba para evitar pegarse
-                    this.body.velocity.y += 0.2
-                } else {
-                    // En suelo, solo reducir velocidad horizontal
-                    this.body.velocity.x *= 0.1
-                    this.body.velocity.z *= 0.1
-                }
-                
-                this.lastCollisionTime = currentTime
-                return
+                this.body.velocity.y = Math.max(this.body.velocity.y * 0.3, -1.0)
+                this.body.velocity.x *= 0.2
+                this.body.velocity.z *= 0.2
             }
             
-            // Colisiones laterales más fluidas y con menos deslizamiento
-            if (Math.abs(normal.x) > 0.5 || Math.abs(normal.z) > 0.5) {
-                const velocityMagnitude = Math.sqrt(this.body.velocity.x**2 + this.body.velocity.z**2)
-                
-                if (velocityMagnitude > 1.5) {
-                    // Obtener dirección actual del personaje
-                    const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(this.group.quaternion)
-                    
-                    // Calcular el dot product para saber si vamos hacia adelante o atrás
-                    const movementDot = forward.x * this.body.velocity.x + forward.z * this.body.velocity.z
-                    const isMovingForward = movementDot > 0
-                    
-                    // Calcular dirección de rebote basada en el movimiento
-                    let bounceDirection = new CANNON.Vec3()
-                    if (isMovingForward) {
-                        // Si va hacia adelante, rebotar hacia atrás con más fuerza
-                        bounceDirection.x = -forward.x * 90// Multiplicador de dirección aumentado
-                        bounceDirection.z = -forward.z * 90
-                    } else {
-                        // Si va hacia atrás, rebotar hacia adelante con más fuerza
-                        bounceDirection.x = forward.x * 90
-                        bounceDirection.z = forward.z * 90
-                    }
-                    
-                    // Aumentar fuerza de rebote
-                    const bounceForce = Math.min(velocityMagnitude * 1.2, 6.0) // Aumentado significativamente
-                    
-                    // Aplicar impulso con más fuerza
-                    this.body.applyImpulse(
-                        new CANNON.Vec3(
-                            bounceDirection.x * bounceForce,
-                            0.2, // Más empuje vertical para evitar pegarse
-                            bounceDirection.z * bounceForce
-                        )
-                    )
-                    
-                    // Mantener más momentum
-                    this.body.velocity.x *= 0.6
-                    this.body.velocity.z *= 0.6
-                }
-            }
-            
-            if (normal.y < -0.3 && this.body.velocity.y > 0) {
-                this.body.velocity.y *= 0.15
-            }
-
             this.lastCollisionTime = currentTime
         }
-    }     checkGroundContact() {
+    }checkGroundContact() {
         const currentTime = Date.now()
         
         // Usar el último estado conocido si no ha pasado suficiente tiempo
@@ -520,22 +430,50 @@ window.addEventListener('keyup', (event) => {
                 this.animation.mixer.uncacheRoot(this.model)
             }
         }
-    }
-
-    dispose() {
-        // Remover event listeners
-        this.body.removeEventListener('collide', this.collisionHandler)
+    }    dispose() {
+        // 1. Remover event listeners del cuerpo físico
+        if (this.body) {
+            this.body.removeEventListener('collide', this.collisionHandler)
+            this.physics.world.removeBody(this.body)
+        }
         
-        // Limpiar recursos
+        // 2. Remover event listeners de ventana
+        window.removeEventListener('keydown', this.handleKeyDown)
+        window.removeEventListener('keyup', this.handleKeyUp)
+        
+        // 3. Detener sonidos
+        if (this.walkSound) {
+            this.walkSound.stop()
+            this.walkSound.dispose?.()
+        }
+        if (this.jumpSound) {
+            this.jumpSound.stop()
+            this.jumpSound.dispose?.()
+        }
+        
+        // 4. Limpiar animaciones
+        if (this.animation?.mixer) {
+            this.animation.mixer.stopAllAction()
+            this.animation.mixer.uncacheRoot(this.model)
+            this.animation.mixer = null
+        }
+        
+        // 5. Limpiar recursos 3D
         this.cleanupResources()
         
-        // Limpiar física
-        this.body.force.setZero()
-        this.body.torque.setZero()
-        this.body.velocity.setZero()
-        this.body.angularVelocity.setZero()
-        window.removeEventListener('keydown', this.handleKeyDown);
-    window.removeEventListener('keyup', this.handleKeyUp);
+        // 6. Remover del scene
+        if (this.group && this.scene) {
+            this.scene.remove(this.group)
+        }
+        
+        // 7. Limpiar referencias
+        this.body = null
+        this.model = null
+        this.group = null
+        this.animation = null
+        this.collisionHandler = null
+        
+        console.log('🧹 Robot resources disposed')
     }
 
     update() {
@@ -762,16 +700,15 @@ window.addEventListener('keyup', (event) => {
         }
 
         this.group.position.copy(this.body.position)
-
-        if (this.debug && this.debug.active) {
-            if (this.bhopSpeed > 0) {
-                console.log(`🐰 Bhop Speed: ${this.bhopSpeed.toFixed(1)}`)
-            }
-            if (this.stunned) {
-                console.log(`😵 STUNNED (${(this.stunMovementFactor * 100).toFixed(0)}% movimiento) - ${((this.stunEndTime - Date.now()) / 1000).toFixed(1)}s`)
-            }
-            if (this.slowEffect) {
-                console.log(`🐌 SLOW (${(this.slowMultiplier * 100).toFixed(0)}%) - ${((this.slowEndTime - Date.now()) / 1000).toFixed(1)}s`)
+        
+        if (this.debug?.active && Date.now() % 1000 < 50) { // Solo debug cada segundo
+            const debugInfo = []
+            if (this.bhopSpeed > 0) debugInfo.push(`🐰 Bhop: ${this.bhopSpeed.toFixed(1)}`)
+            if (this.stunned) debugInfo.push(`😵 STUN: ${((this.stunEndTime - Date.now()) / 1000).toFixed(1)}s`)
+            if (this.slowEffect) debugInfo.push(`🐌 SLOW: ${((this.slowEndTime - Date.now()) / 1000).toFixed(1)}s`)
+            
+            if (debugInfo.length > 0) {
+                console.log(debugInfo.join(' | '))
             }
         }
     }
