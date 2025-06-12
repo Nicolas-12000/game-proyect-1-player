@@ -2,8 +2,7 @@ import * as THREE from 'three'
 import * as CANNON from 'cannon-es'
 import Sound from './Sound.js'
 
-export default class Robot {
-    constructor(experience) {
+export default class Robot {    constructor(experience) {
         this.experience = experience
         this.scene = this.experience.scene
         this.resources = this.experience.resources
@@ -22,10 +21,19 @@ export default class Robot {
         this.lastCollisionTime = 0
         this.collisionCooldown = 200
 
-        // Optimización de verificación de suelo
+        // Control de deslizamiento en muros
+        this.wallCollisionActive = false
+        this.wallCollisionNormal = new THREE.Vector3()
+        this.wallCollisionTimeout = 0
+        this.wallBlockDuration = 300
+        this.debugWallCollision = false        // Optimización de verificación de suelo
         this.lastGroundCheck = 0
         this.groundCheckInterval = 250 // Verificar cada 250ms
         this.lastKnownGroundState = false 
+
+        // 🔧 Sistema de detección de cambios de velocidad extremos
+        this.velocityBuffer = []
+        this.maxVelocityChange = 15.0
 
         // ⚖️ SISTEMA DE STUN/SLOW
         this.stunned = false
@@ -123,17 +131,23 @@ window.addEventListener('keyup', (event) => {
 
         // Reset rotation
         this.group.rotation.set(0, 0, 0)
-        this.body.quaternion.setFromEuler(0, 0, 0)
-
-        // Reset state
+        this.body.quaternion.setFromEuler(0, 0, 0)        // Reset state
         this.bhopSpeed = 0
         this.lastJumpTime = 0
         this.onGround = false
         this.lastCollisionTime = 0
+        
+        // Reset efectos
         this.stunned = false
         this.stunEndTime = 0
         this.slowEffect = false
         this.slowEndTime = 0
+        
+        // Reset colisión de muro
+        this.wallCollisionActive = false
+        this.wallCollisionNormal.set(0, 0, 0)
+        this.wallCollisionTimeout = 0
+        
         this.points = 0
 
         // Restaurar efectos visuales
@@ -260,40 +274,52 @@ window.addEventListener('keyup', (event) => {
         if (contact.bi === this.body || contact.bj === this.body) {
             const normal = contact.bi === this.body ? contact.ni : contact.nj
             const otherBody = contact.bi === this.body ? contact.bj : contact.bi
-            
-            // 1. DETECCIÓN DE SUELO (prioridad máxima)
+              // 1. DETECCIÓN DE SUELO (prioridad máxima)
             if (normal.y > 0.7) {
                 this.onGround = true
                 return
             }
-            
-            // 2. COLISIONES LATERALES CON EFECTOS
+              // 2. COLISIONES LATERALES CON CONTROL DE DESLIZAMIENTO
             const isLateralCollision = Math.abs(normal.x) > 0.4 || Math.abs(normal.z) > 0.4
             if (isLateralCollision) {
-                const velocity = Math.sqrt(this.body.velocity.x**2 + this.body.velocity.z**2)
+                const impactVelocity = Math.sqrt(this.body.velocity.x**2 + this.body.velocity.z**2)
                 
-                // Aplicar efectos según velocidad
-                if (velocity > 5.5) {
-                    this.applyStun()
-                } else if (velocity > 1.8) {
-                    this.applySlow()
+                // Activar sistema de control de muro
+                this.wallCollisionActive = true
+                this.wallCollisionNormal.set(normal.x, 0, normal.z).normalize()
+                this.wallCollisionTimeout = currentTime + this.wallBlockDuration
+                
+                // 🔧 Amortiguación gradual en lugar de detención brusca
+                const dampingFactor = Math.max(0.7, 1.0 - (impactVelocity / 10.0))
+                
+                // Aplicar amortiguación suave
+                this.body.velocity.x *= dampingFactor
+                this.body.velocity.z *= dampingFactor
+                  // Aplicar fuerza de separación suave
+                const separationForce = Math.min(impactVelocity * 0.1, 0.5) // Reducido a 0.5 máximo
+                this.body.applyForce(
+                    new CANNON.Vec3(normal.x * separationForce, 0, normal.z * separationForce),
+                    this.body.position
+                )
+                
+                if (this.debug?.active || this.debugWallCollision) {
+                    console.log(`🧱 Colisión con muro detectada`)
+                    console.log(`📐 Normal del muro: X=${normal.x.toFixed(2)}, Z=${normal.z.toFixed(2)}`)
+                    console.log(`⏰ Bloqueado por ${this.wallBlockDuration}ms`)
                 }
                 
-                // Rebote simple
-                const bounceForce = Math.min(velocity * 0.8, 4.0)
-                const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(this.group.quaternion)
-                
-                this.body.velocity.x += -forward.x * bounceForce
-                this.body.velocity.z += -forward.z * bounceForce
+                // Aplicar efectos según velocidad
+                if (impactVelocity > 5.5) {
+                    this.applyStun()
+                } else if (impactVelocity > 1.8) {
+                    this.applySlow()
+                }
+            }
+              // 3. COLISIONES DESDE ARRIBA
+            if (normal.y > 0.3 && this.body.velocity.y < -1) {
+                this.body.velocity.y = Math.max(this.body.velocity.y * 0.7, -1.0)
                 this.body.velocity.x *= 0.7
                 this.body.velocity.z *= 0.7
-            }
-            
-            // 3. COLISIONES DESDE ARRIBA
-            if (normal.y > 0.3 && this.body.velocity.y < -1) {
-                this.body.velocity.y = Math.max(this.body.velocity.y * 0.3, -1.0)
-                this.body.velocity.x *= 0.2
-                this.body.velocity.z *= 0.2
             }
             
             this.lastCollisionTime = currentTime
@@ -484,73 +510,124 @@ window.addEventListener('keyup', (event) => {
             this.animation.mixer.update(delta)
         }
 
-        // Limpieza periódica de fuerzas cuando no son necesarias
-        if (this.onGround && Math.abs(this.body.velocity.y) < 0.1) {
-            this.body.force.y = 0
-        }
-
-        // Reset de fuerzas angulares cuando no está rotando
-        if (!this.keyboard.getState().left && !this.keyboard.getState().right) {
-            this.body.torque.setZero()
-        }
-
         this.updateStatusEffects()
 
-        // Limpieza periódica de fuerzas residuales
-        if (this.onGround && Math.abs(this.body.velocity.y) < 0.1) {
-            this.body.force.y = 0
-        }
-
-        // Reset de fuerzas angulares si no hay rotación activa
-        if (!this.keyboard.getState().left && !this.keyboard.getState().right &&
-            !this.keyboard.getState().a && !this.keyboard.getState().d) {
-            this.body.torque.setZero()
-        }
-
         const keys = this.keyboard.getState()
-        let moveForce = 50  // REDUCIDO: Era 65 - Velocidad más modesta
-        const turnSpeed = 2.5 // REDUCIDO: Era 2.8 - Rotación más controlada
+        let moveForce = 50
+        const turnSpeed = 2.5
         let isMoving = false
 
-        // ⚖️ APLICAR EFECTOS REBALANCEADOS
+        // Aplicar efectos
         if (this.slowEffect) {
             moveForce *= this.slowMultiplier
         }
         
-        // STUN permite movimiento reducido
         if (this.stunned) {
             moveForce *= this.stunMovementFactor
         }
 
+        // Verificar colisión activa con muro
+        const currentTime = Date.now()
+        if (this.wallCollisionActive) {
+            if (currentTime > this.wallCollisionTimeout) {
+                this.wallCollisionActive = false
+                if (this.debug?.active) {
+                    console.log(`✅ Bloqueo de muro terminado`)
+                }
+            }
+        }
+
+        // Ground check y bhop
         const wasOnGround = this.onGround
         this.onGround = false
         this.checkGroundContact()
         
         if (!wasOnGround && this.onGround) {
-            this.bhopSpeed *= 0.9 // Más pérdida para balance con velocidad reducida
+            this.bhopSpeed *= 0.9
         }
 
-        // ⚖️ LÍMITES DE VELOCIDAD OPTIMIZADOS PARA MAYOR DINAMISMO
-        let maxSpeed = 6.8 // AUMENTADO: Era 6.0 - Más dinámico pero controlado
-        
-        if (this.slowEffect) {
-            maxSpeed *= this.slowMultiplier
-        }
-        
-        if (this.stunned) {
-            maxSpeed *= this.stunMovementFactor
-        }
+        // Límites de velocidad
+        let maxSpeed = 6.8
+        if (this.slowEffect) maxSpeed *= this.slowMultiplier
+        if (this.stunned) maxSpeed *= this.stunMovementFactor
         
         const currentSpeed = Math.sqrt(this.body.velocity.x**2 + this.body.velocity.z**2)
-        
         if (currentSpeed > maxSpeed) {
             const reductionFactor = maxSpeed / currentSpeed
             this.body.velocity.x *= reductionFactor
             this.body.velocity.z *= reductionFactor
         }
 
-        // ⚖️ SISTEMA DE SALTO AJUSTADO PARA VELOCIDAD MÁS BAJA
-        if (keys.space && !this.jumpKeyPressed && (!this.stunned || this.stunMovementFactor > 0)) {
+        // 🔧 Detectar y suavizar cambios de velocidad extremos
+        const currentVel = new CANNON.Vec3().copy(this.body.velocity)
+        if (this.velocityBuffer.length > 0) {
+            const lastVel = this.velocityBuffer[this.velocityBuffer.length - 1]
+            const velocityChange = currentVel.distanceTo(lastVel)
+            
+            if (velocityChange > this.maxVelocityChange) {
+                // Suavizar cambio extremo
+                this.body.velocity.lerp(lastVel, 0.7, this.body.velocity)
+            }
+        }
+
+        this.velocityBuffer.push(currentVel.clone())
+        if (this.velocityBuffer.length > 3) this.velocityBuffer.shift()
+
+        // Movimiento WASD con control de muro
+        const canMove = !this.stunned || this.stunMovementFactor > 0
+        
+        if (canMove) {
+            const isBlockedByWall = this.wallCollisionActive && this.isMovingTowardsWall(keys)
+            
+            if (!isBlockedByWall) {
+                if (keys.up || keys.w) {
+                    const forward = new THREE.Vector3(0, 0, 1)
+                    forward.applyQuaternion(this.group.quaternion)
+                    this.body.applyForce(
+                        new CANNON.Vec3(forward.x * moveForce, 0, forward.z * moveForce),
+                        this.body.position
+                    )
+                    isMoving = true
+                }
+
+                if (keys.down || keys.s) {
+                    const backward = new THREE.Vector3(0, 0, -1)
+                    backward.applyQuaternion(this.group.quaternion)
+                    this.body.applyForce(
+                        new CANNON.Vec3(backward.x * moveForce, 0, backward.z * moveForce),
+                        this.body.position
+                    )
+                    isMoving = true
+                }            } else {
+                // Feedback de colisión suave
+                const resistanceForce = 0.5 // 🔧 Reducido de 2.0 a 0.5 para menos resistencia
+                this.body.applyForce(
+                    new CANNON.Vec3(
+                        -this.wallCollisionNormal.x * resistanceForce,
+                        0,
+                        -this.wallCollisionNormal.z * resistanceForce
+                    ),
+                    this.body.position
+                )
+            }
+
+            // Rotación (siempre permitida)
+            let effectiveTurnSpeed = turnSpeed
+            if (this.stunned) {
+                effectiveTurnSpeed *= this.stunTurnFactor
+            }
+
+            if (keys.left || keys.a) {
+                this.group.rotation.y += effectiveTurnSpeed * delta
+                this.body.quaternion.setFromEuler(0, this.group.rotation.y, 0)
+            }
+
+            if (keys.right || keys.d) {
+                this.group.rotation.y -= effectiveTurnSpeed * delta
+                this.body.quaternion.setFromEuler(0, this.group.rotation.y, 0)
+            }
+        }        // Sistema de salto
+        if (keys.space && !this.jumpKeyPressed && canMove) {
             this.jumpKeyPressed = true
             const currentTime = Date.now()
             
@@ -627,9 +704,7 @@ window.addEventListener('keyup', (event) => {
         // Decay de bhop speed más gradual para mayor dinamismo
         if (this.onGround && !keys.space) {
             this.bhopSpeed *= 0.97 // AUMENTADO: Era 0.90 - Menos pérdida para mantener dinamismo
-        }
-
-        // Reubicación por caída
+        }        // Reubicación por caída
         if (this.body.position.y > 8) {
             this.body.position.set(0, 1, 0)
             this.body.velocity.set(0, 0, 0)
@@ -640,47 +715,6 @@ window.addEventListener('keyup', (event) => {
             this.body.position.set(0, 1, 0)
             this.body.velocity.set(0, 0, 0)
             this.body.angularVelocity.set(0, 0, 0)
-        }
-
-        // ⚖️ MOVIMIENTO WASD CON STUN REDUCIDO
-        const canMove = !this.stunned || this.stunMovementFactor > 0
-        
-        if (canMove) {
-            if (keys.up || keys.w) {
-                const forward = new THREE.Vector3(0, 0, 1)
-                forward.applyQuaternion(this.group.quaternion)
-                this.body.applyForce(
-                    new CANNON.Vec3(forward.x * moveForce, 0, forward.z * moveForce),
-                    this.body.position
-                )
-                isMoving = true
-            }
-
-            if (keys.down || keys.s) {
-                const backward = new THREE.Vector3(0, 0, -1)
-                backward.applyQuaternion(this.group.quaternion)
-                this.body.applyForce(
-                    new CANNON.Vec3(backward.x * moveForce, 0, backward.z * moveForce),
-                    this.body.position
-                )
-                isMoving = true
-            }
-
-            // Rotación reducida durante stun
-            let effectiveTurnSpeed = turnSpeed
-            if (this.stunned) {
-                effectiveTurnSpeed *= this.stunTurnFactor
-            }
-
-            if (keys.left || keys.a) {
-                this.group.rotation.y += effectiveTurnSpeed * delta
-                this.body.quaternion.setFromEuler(0, this.group.rotation.y, 0)
-            }
-
-            if (keys.right || keys.d) {
-                this.group.rotation.y -= effectiveTurnSpeed * delta
-                this.body.quaternion.setFromEuler(0, this.group.rotation.y, 0)
-            }
         }
 
         // Animaciones
@@ -706,21 +740,22 @@ window.addEventListener('keyup', (event) => {
             if (this.bhopSpeed > 0) debugInfo.push(`🐰 Bhop: ${this.bhopSpeed.toFixed(1)}`)
             if (this.stunned) debugInfo.push(`😵 STUN: ${((this.stunEndTime - Date.now()) / 1000).toFixed(1)}s`)
             if (this.slowEffect) debugInfo.push(`🐌 SLOW: ${((this.slowEndTime - Date.now()) / 1000).toFixed(1)}s`)
+            if (this.wallCollisionActive) debugInfo.push(`🧱 WALL: ${((this.wallCollisionTimeout - Date.now()) / 1000).toFixed(1)}s`)
             
             if (debugInfo.length > 0) {
                 console.log(debugInfo.join(' | '))
             }
         }
-    }
-
-    moveInDirection(dir, speed) {
+    }    moveInDirection(dir, speed) {
         if (!window.userInteracted || !this.experience.renderer.instance.xr.isPresenting) {
             return
         }
 
-        // Permitir movimiento móvil reducido durante stun
+        // Verificar colisiones y efectos
         const canMove = !this.stunned || this.stunMovementFactor > 0
-        if (!canMove) {
+        const isBlockedByWall = this.wallCollisionActive && this.isMovingTowardsWall(this.keyboard.getState())
+        
+        if (!canMove || isBlockedByWall) {
             return
         }
 
@@ -751,5 +786,33 @@ window.addEventListener('keyup', (event) => {
             this.group.rotation.y = angle
             this.body.quaternion.setFromEuler(0, this.group.rotation.y, 0)
         }
+    }
+
+    isMovingTowardsWall(keys) {
+        let moveDirection = new THREE.Vector3(0, 0, 0)
+        
+        if (keys.up || keys.w) {
+            moveDirection.z += 1
+        }
+        if (keys.down || keys.s) {
+            moveDirection.z -= 1
+        }
+        
+        if (moveDirection.length() === 0) {
+            return false
+        }
+        
+        moveDirection.normalize()
+        moveDirection.applyQuaternion(this.group.quaternion)
+        
+        const dotProduct = moveDirection.dot(this.wallCollisionNormal)
+        const threshold = 0.3
+        const isTowardsWall = dotProduct > threshold
+        
+        if (this.debug?.active && isTowardsWall) {
+            console.log(`🚫 Movimiento hacia muro bloqueado (dot: ${dotProduct.toFixed(2)})`)
+        }
+        
+        return isTowardsWall
     }
 }

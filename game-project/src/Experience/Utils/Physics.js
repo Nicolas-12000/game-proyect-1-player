@@ -39,10 +39,10 @@ export default class Physics {
             {
                 friction: 0.2,                         // 🔧 Menos fricción para deslizar: 0.35 → 0.2
                 restitution: 0.0,                      // 🔧 Completamente sin rebote
-                contactEquationStiffness: 5e5,         // 🔧 Mucho menos rígido: 8e5 → 5e5
-                contactEquationRelaxation: 20,         // 🔧 Muy suave: 12 → 20
-                frictionEquationStiffness: 5e4,        // 🔧 Menos rígido: 8e4 → 5e4
-                frictionEquationRelaxation: 20         // 🔧 Muy suave: 12 → 20
+                contactEquationStiffness: 2e5,         // 🔧 Extremadamente suave: reducido a 2e5
+                contactEquationRelaxation: 30,         // 🔧 Muy gradual: aumentado a 30
+                frictionEquationStiffness: 2e4,        // 🔧 Muy suave: reducido a 2e4
+                frictionEquationRelaxation: 30         // 🔧 Muy gradual: aumentado a 30
             }
         )
         this.world.addContactMaterial(robotObstacleContact)
@@ -50,14 +50,13 @@ export default class Physics {
         // 🔧 Contacto robot vs muros - Optimizado para colisiones graduales
         const robotWallContact = new CANNON.ContactMaterial(
             this.robotMaterial,
-            this.wallMaterial,
-            {
-                friction: 0.8,                        // 🔧 Menos fricción: 0.4 → 0.25
+            this.wallMaterial,            {
+                friction: 0.3,                         // 🔧 Fricción reducida
                 restitution: 0.0,                      // 🔧 Sin rebote
-                contactEquationStiffness: 6e5,         // 🔧 Mucho menos rígido: 7e5 → 4e5
-                contactEquationRelaxation: 15,         // 🔧 Extremadamente suave: 15 → 25
-                frictionEquationStiffness: 6e4,        // 🔧 Menos rígido: 7e4 → 4e4
-                frictionEquationRelaxation: 15         // 🔧 Extremadamente suave: 15 → 25
+                contactEquationStiffness: 1e5,         // 🔧 Muy suave: reducido drásticamente
+                contactEquationRelaxation: 50,         // 🔧 Muy gradual
+                frictionEquationStiffness: 1e4,        // 🔧 Muy suave
+                frictionEquationRelaxation: 50         // 🔧 Muy gradual
             }
         )
         this.world.addContactMaterial(robotWallContact)
